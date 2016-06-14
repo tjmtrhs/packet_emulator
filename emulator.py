@@ -20,13 +20,15 @@ class nic(threading.Thread):
     def addHost(self, mac, host):
         self.macAddressTable[mac] = host
     def sendp(self, packet):
-        sendp(packet, iface=self.nicName)
+        # sendp(packet, iface=self.nicName)
         # mock
         # be careful for call stack depth
         self.dispatch(packet)
     def run(self):
-        reply = srp1(self.dummyPacket, iface=self.nicName)
-        self.dispatch(reply)
+        # TODO
+        while True:
+            reply = srp1(self.dummyPacket, iface=self.nicName)
+            self.dispatch(reply)
     def dispatch(self, reply):
         if self.macAddressTable.has_key(reply[Ether].dst):
             self.macAddressTable[reply[Ether].dst].recv(reply)
