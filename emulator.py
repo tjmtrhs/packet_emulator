@@ -191,16 +191,62 @@ class VirtualServer(VirtualHost):
         return self.result
 
 if __name__ == '__main__':
-    testNic = nic(nicName="lo")
-    testServer = VirtualServer(ip="10.0.0.1", mac="11:11:11:11:11:11", nic=testNic, name="testServer");
-    testServer.printSettings();
-    testServer.start()
+
+    config = {}
+
+    # server
+    config["host"] = {}
+    config["host"]["connect"] = "direct" # or "router"
+    config["host"]["ip"] = "10.0.0.1"
+    config["host"]["interface"] = "lo"
+    config["host"]["mac"] = "11:11:11:11:11:11"
+    config["scenario"] = {}
+    config["scenario"]["type"] = "server" # or "client"
+    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
+    config["scenario"]["listen_port"] = "22"
+    config["FW"] = {}
+    config["FW"]["mac"] = "22:22:22:22:22:22"
+    config["test"] = {}
+    config["test"]["timeout"] = "30"
+
+    # client
+    config["host"] = {}
+    config["host"]["connect"] = "router"
+    config["host"]["ip"] = "192.168.0.2"
+    config["host"]["interface"] = "lo"
+    config["host"]["router_mac"] = "22:22:22:22:22:22"
+    config["scenario"]["type"] = "client"
+    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
+    config["scenario"]["dst_ip"] = "10.0.0.1"
+    config["scenario"]["dst_port"] = "22"
+    config["scenario"]["src_port"] = "5000"
+    config["FW"]["mac"] = "11:11:11:11:11:11"
+    config["test"]["timeout"] = "30"
+
+
+    # TODO check config dictionary before
+
+    if config["scenario"]["type"] == "server":
+        testNic = nic(nicName=config["host"]["interface"])
+        testServer = VirtualServer( \
+            ip=config["host"]["ip"], \
+                mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
+                nic=testNic, \
+                name="testServer");
+        testServer.printSettings();
+        testServer.start()
 
     time.sleep(0.5)
 
-    testClient = VirtualClient(ip="192.168.0.2", mac="22:22:22:22:22:22", nic=testNic, name="testClient");
-    testClient.printSettings()
-    testClient.run()
+    if config["scenario"]["type"] == "client":
+        testNic = nic(nicName=config["host"]["interface"])
+        testClient = VirtualClient( \
+            ip=config["host"]["ip"], \
+                mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
+                nic=testNic, \
+                name="testClient");
+        testClient.printSettings()
+        testClient.run()
 
     print testClient.getResult()
     print testServer.getResult()
