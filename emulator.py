@@ -131,8 +131,8 @@ class VirtualClient(VirtualHost):
         # if in python 3, we can write super().__init__(ip)
         super(VirtualClient, self).__init__(config, nic, name)
 
-    def run(self):
-        packet = Ether(src=self.mac, dst="11:11:11:11:11:11")/IP(src=self.ip, dst="10.0.0.1")/TCP(sport=5000,dport=22,flags="S")
+    def tcpTest(self):
+        packet = Ether(src=self.mac, dst=self.config["FW"]["mac"])/IP(src=self.ip, dst=self.config["scenario"]["dst_ip"])/TCP(sport=self.config["scenario"]["src_port"],dport=self.config["scenario"]["dst_port"],flags="S")
 
         logger("DEBUG", self.name, "send SYN, change state to syn_sent")
         self.state = "tcp-syn_sent"
@@ -140,14 +140,18 @@ class VirtualClient(VirtualHost):
 
         if self.state == "tcp-established":
             logger("DEBUG", self.name, "send test payload");
-            packet = Ether(src=self.mac, dst="11:11:11:11:11:11")/IP(src=self.ip, dst="10.0.0.1")/TCP(sport=5000,dport=22,flags="")/"This is a test"
+            packet = Ether(src=self.mac, dst=self.config["FW"]["mac"])/IP(src=self.ip, dst=self.config["scenario"]["dst_ip"])/TCP(sport=self.config["scenario"]["src_port"],dport=self.config["scenario"]["dst_port"],flags="")/"This is a test"
             self.nic.sendp(packet)
 
             # close connection
             logger("DEBUG", self.name, "send FIN, change state to FIN_WAIT_1");
             self.state = "tcp-fin_wait_1"
-            packet = Ether(src=self.mac, dst="11:11:11:11:11:11")/IP(src=self.ip, dst="10.0.0.1")/TCP(sport=5000,dport=22,flags="F")
+            packet = Ether(src=self.mac, dst=self.config["FW"]["mac"])/IP(src=self.ip, dst=self.config["scenario"]["dst_ip"])/TCP(sport=self.config["scenario"]["src_port"],dport=self.config["scenario"]["dst_port"],flags="F")
             self.nic.sendp(packet)
+        return
+
+    def run(self):
+        self.tcpTest()
         return
 
     def recv(self, reply):
@@ -207,11 +211,11 @@ if __name__ == '__main__':
     config["scenario"] = {}
     config["scenario"]["type"] = "server" # or "client"
     config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["listen_port"] = "22"
+    config["scenario"]["listen_port"] = 22 # must be integer
     config["FW"] = {}
     config["FW"]["mac"] = "22:22:22:22:22:22"
     config["test"] = {}
-    config["test"]["timeout"] = "30"
+    config["test"]["timeout"] = 30
 
 
 
@@ -238,8 +242,8 @@ if __name__ == '__main__':
     config["scenario"]["type"] = "client"
     config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
     config["scenario"]["dst_ip"] = "10.0.0.1"
-    config["scenario"]["dst_port"] = "22"
-    config["scenario"]["src_port"] = "5000"
+    config["scenario"]["dst_port"] = 22
+    config["scenario"]["src_port"] = 5000
     config["FW"] = {}
     config["FW"]["mac"] = "11:11:11:11:11:11"
     config["test"] = {}
