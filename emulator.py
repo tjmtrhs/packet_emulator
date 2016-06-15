@@ -40,14 +40,17 @@ class nic(threading.Thread):
 class VirtualHost(threading.Thread):
     """emulate host behavior"""
 
-    def __init__(self, ip, mac, nic, name):
+    def __init__(self, config, nic, name):
         threading.Thread.__init__(self)
-        self.ip = ip
+        self.config = copy.deepcopy(config)
+        self.ip = config["host"]["ip"]
+        self.mac = config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"]
+
         self.nic = nic
-        self.mac = mac
-        self.nic.addHost(mac=mac, host=self)
+        self.nic.addHost(mac=self.mac, host=self)
         self.name = name
         self.state = "tcp-closed"
+
 
     def run(self):
         return
@@ -124,9 +127,9 @@ class VirtualHost(threading.Thread):
 
 
 class VirtualClient(VirtualHost):
-    def __init__(self, ip, mac, nic, name):
+    def __init__(self, config, nic, name):
         # if in python 3, we can write super().__init__(ip)
-        super(VirtualClient, self).__init__(ip, mac, nic, name)
+        super(VirtualClient, self).__init__(config, nic, name)
 
     def run(self):
         packet = Ether(src=self.mac, dst="11:11:11:11:11:11")/IP(src=self.ip, dst="10.0.0.1")/TCP(sport=5000,dport=22,flags="S")
@@ -163,9 +166,9 @@ class VirtualClient(VirtualHost):
         return self.result
 
 class VirtualServer(VirtualHost):
-    def __init__(self, ip, mac, nic, name):
+    def __init__(self, config, nic, name):
         # if in python 3, we can write super().__init__(ip)
-        super(VirtualServer, self).__init__(ip, mac, nic, name)
+        super(VirtualServer, self).__init__(config, nic, name)
 
     def run(self):
         self.state = "tcp-listen"
@@ -217,8 +220,7 @@ if __name__ == '__main__':
     testNic = nic(nicName=config["host"]["interface"])
     if config["scenario"]["type"] == "server":
         testServer = VirtualServer( \
-            ip=config["host"]["ip"], \
-                mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
+            config=config, \
                 nic=testNic, \
                 name="testServer");
         testServer.printSettings();
@@ -245,8 +247,7 @@ if __name__ == '__main__':
 
     if config["scenario"]["type"] == "client":
         testClient = VirtualClient( \
-            ip=config["host"]["ip"], \
-                mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
+            config=config, \
                 nic=testNic, \
                 name="testClient");
         testClient.printSettings()
