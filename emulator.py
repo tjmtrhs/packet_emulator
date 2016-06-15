@@ -6,6 +6,7 @@ from scapy.all import *
 import pprint
 import threading
 import time
+import copy
 
 def logger(level, module, message):
     print "[" + level + "][" + module + "]" + message
@@ -209,25 +210,12 @@ if __name__ == '__main__':
     config["test"] = {}
     config["test"]["timeout"] = "30"
 
-    # client
-    config["host"] = {}
-    config["host"]["connect"] = "router"
-    config["host"]["ip"] = "192.168.0.2"
-    config["host"]["interface"] = "lo"
-    config["host"]["router_mac"] = "22:22:22:22:22:22"
-    config["scenario"]["type"] = "client"
-    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["dst_ip"] = "10.0.0.1"
-    config["scenario"]["dst_port"] = "22"
-    config["scenario"]["src_port"] = "5000"
-    config["FW"]["mac"] = "11:11:11:11:11:11"
-    config["test"]["timeout"] = "30"
 
 
     # TODO check config dictionary before
 
+    testNic = nic(nicName=config["host"]["interface"])
     if config["scenario"]["type"] == "server":
-        testNic = nic(nicName=config["host"]["interface"])
         testServer = VirtualServer( \
             ip=config["host"]["ip"], \
                 mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
@@ -238,8 +226,24 @@ if __name__ == '__main__':
 
     time.sleep(0.5)
 
+    # client
+    config["host"] = {}
+    config["host"]["connect"] = "router"
+    config["host"]["ip"] = "192.168.0.2"
+    config["host"]["interface"] = "lo"
+    config["host"]["router_mac"] = "22:22:22:22:22:22"
+    config["scenario"] = {}
+    config["scenario"]["type"] = "client"
+    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
+    config["scenario"]["dst_ip"] = "10.0.0.1"
+    config["scenario"]["dst_port"] = "22"
+    config["scenario"]["src_port"] = "5000"
+    config["FW"] = {}
+    config["FW"]["mac"] = "11:11:11:11:11:11"
+    config["test"] = {}
+    config["test"]["timeout"] = "30"
+
     if config["scenario"]["type"] == "client":
-        testNic = nic(nicName=config["host"]["interface"])
         testClient = VirtualClient( \
             ip=config["host"]["ip"], \
                 mac= config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"], \
