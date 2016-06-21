@@ -68,7 +68,17 @@ class VirtualHost(threading.Thread):
     def recv(self, reply):
         # do not use blocking functions
         logger("DEBUG", self.name, "recv packet")
+
+        # ICMP
+        if(reply[IP].proto == 1 and \
+               reply[ICMP].type == 8):
+            logger("DEBUG", self.name, "recv icmp-request, send reply")
+            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/ICMP(type="echo-reply")
+            self.nic.sendp(packet)
+
+        # TCP negotiation
         if(self.state == "tcp-syn_sent" and \
+               reply[IP].proto == 6 and \
                reply[TCP].flags & (0x02 | 0x10) == (0x02 | 0x10)):
             # 実はACKは無くてもいいかもしれない
             logger("DEBUG", self.name, "recv SYN ACK, change state to established, send ACK")
@@ -76,16 +86,19 @@ class VirtualHost(threading.Thread):
             self.state = "tcp-established"
             self.nic.sendp(packet)
         elif(self.state == "tcp-listen" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x02 == 0x02):
             logger("DEBUG", self.name, "recv SYN, change state to syn_rcvd, send SYN ACK")
             packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="SA")
             self.state = "tcp-syn_rcvd"
             self.nic.sendp(packet)
         elif(self.state == "tcp-syn_rcvd" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x10 == 0x10):
             logger("DEBUG", self.name, "recv ACK, change state to established")
             self.state = "tcp-established"
         elif(self.state == "tcp-established" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x01 == 0x01):
             logger("DEBUG", self.name, "recv FIN, change state to close_wait, send ACK")
             self.state = "tcp-close_wait"
@@ -96,26 +109,31 @@ class VirtualHost(threading.Thread):
             packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="F")
             self.nic.sendp(packet)
         elif(self.state == "tcp-last_ack" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x10 == 0x10):
             logger("DEBUG", self.name, "recv ACK, change state to closed")
             self.state = "tcp-closed"
         elif(self.state == "tcp-fin_wait_1" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x01 == 0x01):
             logger("DEBUG", self.name, "recv FIN, change state to closing, send ACK")
             self.state = "tcp-closing"
             packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")
             self.nic.sendp(packet)
         elif(self.state == "tcp-fin_wait_1" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x10 == 0x10):
             logger("DEBUG", self.name, "recv ACK, change state to fin_wait_2")
             self.state = "tcp-fin_wait_2"
         elif(self.state == "tcp-fin_wait_2" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x01 == 0x01):
             logger("DEBUG", self.name, "recv FIN, change state to time_wait, send ACK")
             self.state = "tcp-time_wait"
             packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")
             self.nic.sendp(packet)
         elif(self.state == "tcp-closing" and \
+                 reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x10 == 0x10):
             logger("DEBUG", self.name, "recv ACK, change state to time_wait")
             self.state = "tcp-time_wait"
@@ -150,7 +168,14 @@ class VirtualClient(VirtualHost):
             self.nic.sendp(packet)
         return
 
+    def icmpTest(self):
+        packet = Ether(src=self.mac, dst=self.config["FW"]["mac"])/IP(src=self.ip, dst=self.config["scenario"]["dst_ip"])/ICMP(type="echo-request")
+        logger("DEBUG", self.name, "send ICMP-request")
+        self.nic.sendp(packet)
+        return
+
     def run(self):
+        self.icmpTest()
         self.tcpTest()
         return
 
@@ -160,11 +185,13 @@ class VirtualClient(VirtualHost):
         ret = super(VirtualClient, self).recv(reply)
         if ret == 1:
             return
-        if reply[TCP].flags & 0x10 == 0x10:
+        if reply[IP].proto == 6 and reply[TCP].flags & 0x10 == 0x10:
             logger("DEBUG", self.name, "recv ACK+msg, send ACK")
             self.result = reply.load
             packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")
             self.nic.sendp(packet)
+        if reply[IP].proto == 1 and reply[ICMP].type == 0:
+            logger("DEBUG", self.name, "recv icmp-reply")
 
     def getResult(self):
         return self.result
@@ -186,13 +213,15 @@ class VirtualServer(VirtualHost):
         if ret == 1:
             return
         # omugaeshi
-        if reply[TCP].flags & 0x10 == 0x10:
-            logger("DEBUG", self.name, "recv ACK")
-        else:
-            logger("DEBUG", self.name, "recv mesage, send ACK+msg")
-            self.result = reply.load
-            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")/( "okaeshi" + reply.load)
-            self.nic.sendp(packet)
+        if self.state == "tcp-established" and \
+                reply[IP].proto == 6 :
+            if reply[TCP].flags & 0x10 == 0x10:
+                logger("DEBUG", self.name, "recv ACK")
+            else:
+                logger("DEBUG", self.name, "recv mesage, send ACK+msg")
+                self.result = reply.load
+                packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")/( "okaeshi" + reply.load)
+                self.nic.sendp(packet)
 
 
     def getResult(self):
