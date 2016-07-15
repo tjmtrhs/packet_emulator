@@ -10,32 +10,73 @@ import copy
 
 def logger(level, module, message):
     print "[" + level + "][" + module + "]" + message
+class queue(threading.Thread):
+    def __init__(self, nic):
+        threading.Thread.__init__(self)
+        self.nic = nic
+        self.list = []
+        self.stopFlag = True
+    def add(self, packet):
+        self.list.append(packet)
+    def run(self):
+        self.stopFlag = False
+        while True:
+            if self.stopFlag :
+                break
+            if len(self.list)>0 :
+                packet = self.list.pop(0)
+                self.nic.dispatch(packet)
+            else:
+                time.sleep(0.1)
+    def stop(self):
+        self.stopFlag = True
 
 class nic(threading.Thread):
     def __init__(self, nicName):
         threading.Thread.__init__(self)
         self.macAddressTable = {}
         self.nicName = nicName
+        self.queue = queue(nic=self)
+        self.stopFlag = True
     def getNicName(self):
         return self.nicName
     def addHost(self, mac, host):
         self.macAddressTable[mac] = host
     def sendp(self, packet):
-        # sendp(packet, iface=self.nicName)
+        sendp(packet, iface=self.nicName)
         # mock
         # be careful for call stack depth
-        self.dispatch(packet)
+        # self.dispatch(packet)
     def run(self):
+        self.queue.start()
+        self.stopFlag = False
         # TODO
         while True:
-            reply = srp1(self.dummyPacket, iface=self.nicName)
-            self.dispatch(reply)
+            if self.stopFlag:
+                break
+            reply = sniff(count=2, iface=self.nicName, timeout=5)
+            print "recv"
+            if reply is not None:
+                reply.show()
+                for r in reply:
+                    self.queue.add(r)
+        self.queue.stop()
+        self.queue.join()
     def dispatch(self, reply):
+        if not reply.haslayer(Ether) :
+            return
+        if self.macAddressTable.has_key(reply[Ether].src):
+            return
+        if reply[Ether].dst == "ff:ff:ff:ff:ff:ff":
+            for mac in self.macAddressTable:
+                self.macAddressTable[mac].recv(reply)
         if self.macAddressTable.has_key(reply[Ether].dst):
             self.macAddressTable[reply[Ether].dst].recv(reply)
         else:
             print "ERROR : cannot dispatch"
             reply.show()
+    def stop(self):
+        self.stopFlag = True
 
 class VirtualHost(threading.Thread):
     """emulate host behavior"""
@@ -43,13 +84,17 @@ class VirtualHost(threading.Thread):
     def __init__(self, config, nic, name):
         threading.Thread.__init__(self)
         self.config = copy.deepcopy(config)
-        self.ip = config["host"]["ip"]
-        self.mac = config["host"]["mac"] if config["host"]["connect"] == "direct" else config["host"]["router_mac"]
+        self.ip = self.config["host"]["ip"]
+        if self.config["host"]["connect"] == "direct":
+            self.mac = self.config["host"]["mac"]
+        else:
+            self.mac = self.config["host"]["router_mac"]
 
         self.nic = nic
         self.nic.addHost(mac=self.mac, host=self)
         self.name = name
         self.state = "tcp-closed"
+        self.arp_cache = {}
 
 
     def run(self):
@@ -68,6 +113,19 @@ class VirtualHost(threading.Thread):
     def recv(self, reply):
         # do not use blocking functions
         logger("DEBUG", self.name, "recv packet")
+
+        # ARP
+        if reply.haslayer(ARP):
+            if reply[ARP].op == ARP.is_at:
+                logger("DEBUG", self.name, "recv arp is_at " + reply[ARP].psrc + " " + reply[ARP].hwsrc)
+                self.arp_cache[reply[ARP].psrc] = reply[ARP].hwsrc
+                return 1
+            elif reply[ARP].op == ARP.who_has and reply[ARP].pdst == self.ip:
+                logger("DEBUG", self.name, "recv arp who_has " + reply[ARP].pdst + ", send is_at " + self.mac)
+                packet = Ether(src=self.mac, dst=reply[ARP].hwsrc)/ARP(op=ARP.is_at, psrc=self.ip, pdst=reply[ARP].psrc, hwsrc=self.mac, hwdst=reply[ARP].hwsrc)
+                self.nic.sendp(packet)
+                return 1
+            return 1 # TODO
 
         # ICMP
         if(reply[IP].proto == 1 and \
@@ -156,11 +214,14 @@ class VirtualClient(VirtualHost):
         self.state = "tcp-syn_sent"
         self.nic.sendp(packet)
 
+        # TODO timeout
+        time.sleep(1.0)
         if self.state == "tcp-established":
             logger("DEBUG", self.name, "send test payload");
             packet = Ether(src=self.mac, dst=self.config["FW"]["mac"])/IP(src=self.ip, dst=self.config["scenario"]["dst_ip"])/TCP(sport=self.config["scenario"]["src_port"],dport=self.config["scenario"]["dst_port"],flags="")/"This is a test"
             self.nic.sendp(packet)
 
+            time.sleep(1.0)
             # close connection
             logger("DEBUG", self.name, "send FIN, change state to FIN_WAIT_1");
             self.state = "tcp-fin_wait_1"
@@ -175,8 +236,25 @@ class VirtualClient(VirtualHost):
         return
 
     def run(self):
+        # FW mac
+        try_count = 0
+        while True:
+            if not self.config["FW"].has_key("mac") or self.config["FW"]["mac"] == "":
+                logger("DEBUG", self.name, "ARP resolv " + self.config["FW"]["ip"])
+                packet = Ether(src=self.mac, dst="ff:ff:ff:ff:ff:ff")/ARP(op=ARP.who_has, psrc=self.ip, pdst=self.config["FW"]["ip"], hwsrc=self.mac, hwdst="00:00:00:00:00:00")
+                self.nic.sendp(packet)
+                try_count += 1
+                time.sleep(0.5)
+                if self.arp_cache.has_key(self.config["FW"]["ip"]):
+                    self.config["FW"]["mac"] = self.arp_cache[self.config["FW"]["ip"]]
+                    logger("DEBUG", self.name, "ARP resolv " + self.config["FW"]["ip"] + " is " + self.config["FW"]["mac"])
+                    break
+            if try_count > 5:
+                logger("ERROR", self.name, "cannot ARP resolv " + self.config["FW"]["ip"])
+                break
+            
         self.icmpTest()
-        self.tcpTest()
+        # self.tcpTest()
         return
 
     def recv(self, reply):
@@ -192,6 +270,7 @@ class VirtualClient(VirtualHost):
             self.nic.sendp(packet)
         if reply[IP].proto == 1 and reply[ICMP].type == 0:
             logger("DEBUG", self.name, "recv icmp-reply")
+            self.result = "get icmp-reply"
 
     def getResult(self):
         return self.result
@@ -234,15 +313,15 @@ if __name__ == '__main__':
     # server
     config["host"] = {}
     config["host"]["connect"] = "direct" # or "router"
-    config["host"]["ip"] = "10.0.0.1"
-    config["host"]["interface"] = "lo"
-    config["host"]["mac"] = "11:11:11:11:11:11"
+    config["host"]["ip"] = "172.16.0.2"
+    config["host"]["interface"] = "ens35"
+    config["host"]["mac"] = "00:00:00:11:11:11"
     config["scenario"] = {}
     config["scenario"]["type"] = "server" # or "client"
     config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["listen_port"] = 22 # must be integer
+    config["scenario"]["listen_port"] = 5000 # must be integer
     config["FW"] = {}
-    config["FW"]["mac"] = "22:22:22:22:22:22"
+    config["FW"]["mac"] = "d8:24:bd:ff:0a:41"
     config["test"] = {}
     config["test"]["timeout"] = 30
 
@@ -251,6 +330,7 @@ if __name__ == '__main__':
     # TODO check config dictionary before
 
     testNic = nic(nicName=config["host"]["interface"])
+    testNic.start()
     if config["scenario"]["type"] == "server":
         testServer = VirtualServer( \
             config=config, \
@@ -264,17 +344,18 @@ if __name__ == '__main__':
     # client
     config["host"] = {}
     config["host"]["connect"] = "router"
-    config["host"]["ip"] = "192.168.0.2"
-    config["host"]["interface"] = "lo"
-    config["host"]["router_mac"] = "22:22:22:22:22:22"
+    config["host"]["ip"] = "172.16.1.2"
+    config["host"]["interface"] = "ens35"
+    config["host"]["router_mac"] = "00:00:00:22:22:22"
     config["scenario"] = {}
     config["scenario"]["type"] = "client"
     config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["dst_ip"] = "10.0.0.1"
-    config["scenario"]["dst_port"] = 22
-    config["scenario"]["src_port"] = 5000
+    config["scenario"]["dst_ip"] = "172.16.0.2"
+    config["scenario"]["dst_port"] = 5000
+    config["scenario"]["src_port"] = 20000
     config["FW"] = {}
-    config["FW"]["mac"] = "11:11:11:11:11:11"
+    # config["FW"]["mac"] = "d8:24:bd:ff:0a:42"
+    config["FW"]["ip"] = "172.16.1.1"
     config["test"] = {}
     config["test"]["timeout"] = "30"
 
@@ -286,6 +367,9 @@ if __name__ == '__main__':
         testClient.printSettings()
         testClient.run()
 
-    print testClient.getResult()
-    print testServer.getResult()
+    time.sleep(1.0)
 
+    time.sleep(2.0)
+    testNic.stop()
+    testNic.join()
+    print testClient.getResult()
