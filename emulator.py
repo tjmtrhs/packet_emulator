@@ -258,7 +258,7 @@ class VirtualClient(VirtualHost):
             if try_count > 5:
                 logger("ERROR", self.name, "cannot ARP resolv " + self.config["FW"]["ip"])
                 break
-            
+
         self.icmpTest()
         # self.tcpTest()
         return
@@ -359,7 +359,6 @@ if __name__ == '__main__':
         clientConfig["test"] = {}
         clientConfig["test"]["timeout"] = row[15]
 
-    
     # TODO check config dictionary before
 
     # server
@@ -392,4 +391,6 @@ if __name__ == '__main__':
     time.sleep(2.0)
     testNic.stop()
     testNic.join()
+
     print testClient.getResult()
+
