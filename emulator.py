@@ -7,6 +7,9 @@ import pprint
 import threading
 import time
 import copy
+import csv
+import sys
+import re
 
 def logger(level, module, message):
     print "[" + level + "][" + module + "]" + message
@@ -108,6 +111,7 @@ class VirtualHost(threading.Thread):
         print self.ip
         print self.mac
         print self.nic.getNicName()
+        print self.config
         print "*** end ***"
 
     def recv(self, reply):
@@ -249,6 +253,8 @@ class VirtualClient(VirtualHost):
                     self.config["FW"]["mac"] = self.arp_cache[self.config["FW"]["ip"]]
                     logger("DEBUG", self.name, "ARP resolv " + self.config["FW"]["ip"] + " is " + self.config["FW"]["mac"])
                     break
+            else:
+                break
             if try_count > 5:
                 logger("ERROR", self.name, "cannot ARP resolv " + self.config["FW"]["ip"])
                 break
@@ -308,27 +314,56 @@ class VirtualServer(VirtualHost):
 
 if __name__ == '__main__':
 
-    config = {}
+    param = sys.argv
+    configReader = csv.reader(open(param[1], 'rb'), delimiter=',', quotechar='"')
+    for row in configReader:
+        if re.match("^#",row[0]):
+            continue
+        serverConfig = {}
+        serverConfig["host"] = {}
+        serverConfig["host"]["connect"] = row[0]
+        serverConfig["host"]["ip"] = row[1]
+        serverConfig["host"]["interface"] = row[2]
+        if row[0] == "direct":
+            serverConfig["host"]["mac"] = row[3]
+        else:
+            serverConfig["host"]["router_mac"] = row[3]
+        serverConfig["scenario"] = {}
+        serverConfig["scenario"]["type"] = "server"
+        serverConfig["scenario"]["protocol"] = row[4]
+        serverConfig["scenario"]["listen_port"] = int(row[5])
+        serverConfig["FW"] = {}
+        serverConfig["FW"]["ip"] = row[6]
+        serverConfig["FW"]["mac"] = row[7]
+        serverConfig["test"] = {}
+        serverConfig["test"]["timeout"] = row[15]
 
-    # server
-    config["host"] = {}
-    config["host"]["connect"] = "direct" # or "router"
-    config["host"]["ip"] = "172.16.0.2"
-    config["host"]["interface"] = "ens35"
-    config["host"]["mac"] = "00:00:00:11:11:11"
-    config["scenario"] = {}
-    config["scenario"]["type"] = "server" # or "client"
-    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["listen_port"] = 5000 # must be integer
-    config["FW"] = {}
-    config["FW"]["mac"] = "d8:24:bd:ff:0a:41"
-    config["test"] = {}
-    config["test"]["timeout"] = 30
+        clientConfig = {}
+        clientConfig["host"] = {}
+        clientConfig["host"]["connect"] = row[8]
+        clientConfig["host"]["ip"] = row[9]
+        clientConfig["host"]["interface"] = row[10]
+        if row[0] == "direct":
+            clientConfig["host"]["mac"] = row[11]
+        else:
+            clientConfig["host"]["router_mac"] = row[11]
+        clientConfig["scenario"] = {}
+        clientConfig["scenario"]["type"] = "client"
+        clientConfig["scenario"]["protocol"] = row[4]
+        clientConfig["scenario"]["dst_ip"] = row[1]
+        clientConfig["scenario"]["dst_port"] = int(row[5])
+        clientConfig["scenario"]["src_port"] = int(row[12])
+        clientConfig["FW"] = {}
+        clientConfig["FW"]["ip"] = row[13]
+        clientConfig["FW"]["mac"] = row[14]
+        clientConfig["test"] = {}
+        clientConfig["test"]["timeout"] = row[15]
 
-
-
+    
     # TODO check config dictionary before
 
+    # server
+    config = serverConfig
     testNic = nic(nicName=config["host"]["interface"])
     testNic.start()
     if config["scenario"]["type"] == "server":
@@ -342,22 +377,7 @@ if __name__ == '__main__':
     time.sleep(0.5)
 
     # client
-    config["host"] = {}
-    config["host"]["connect"] = "router"
-    config["host"]["ip"] = "172.16.1.2"
-    config["host"]["interface"] = "ens35"
-    config["host"]["router_mac"] = "00:00:00:22:22:22"
-    config["scenario"] = {}
-    config["scenario"]["type"] = "client"
-    config["scenario"]["protocol"] = "tcp" # or "udp", "icmp"
-    config["scenario"]["dst_ip"] = "172.16.0.2"
-    config["scenario"]["dst_port"] = 5000
-    config["scenario"]["src_port"] = 20000
-    config["FW"] = {}
-    # config["FW"]["mac"] = "d8:24:bd:ff:0a:42"
-    config["FW"]["ip"] = "172.16.1.1"
-    config["test"] = {}
-    config["test"]["timeout"] = "30"
+    config = clientConfig
 
     if config["scenario"]["type"] == "client":
         testClient = VirtualClient( \
