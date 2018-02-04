@@ -151,13 +151,14 @@ class VirtualHost(threading.Thread):
                  reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x02 == 0x02):
             logger("DEBUG", self.name, "recv SYN, change state to syn_rcvd, send SYN ACK")
-            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="SA")
+            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="SA", ack=reply[TCP].seq+1)
             self.state = "tcp-syn_rcvd"
             self.nic.sendp(packet)
         elif(self.state == "tcp-syn_rcvd" and \
                  reply[IP].proto == 6 and \
                  reply[TCP].flags & 0x10 == 0x10):
             logger("DEBUG", self.name, "recv ACK, change state to established")
+            self.peer_seq = 0
             self.state = "tcp-established"
         elif(self.state == "tcp-established" and \
                  reply[IP].proto == 6 and \
@@ -300,12 +301,13 @@ class VirtualServer(VirtualHost):
         # omugaeshi
         if self.state == "tcp-established" and \
                 reply[IP].proto == 6 :
-            if reply[TCP].flags & 0x10 == 0x10:
+            if reply[TCP].flags & 0x10 == 0x10 and reply[TCP].seq == self.peer_seq:
                 logger("DEBUG", self.name, "recv ACK")
             else:
                 logger("DEBUG", self.name, "recv mesage, send ACK+msg")
-                self.result = reply.load
-                packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A")/( "okaeshi" + reply.load)
+                self.peer_seq = reply[TCP].seq
+                self.result = reply[Raw].load
+                packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/TCP(sport=reply[TCP].dport, dport=reply[TCP].sport, flags="A", ack=reply[TCP].seq + len(reply[Raw].load))/( "echo reply:" + reply[Raw].load)
                 self.nic.sendp(packet)
 
 
