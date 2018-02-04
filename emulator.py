@@ -135,7 +135,7 @@ class VirtualHost(threading.Thread):
         if(reply[IP].proto == 1 and \
                reply[ICMP].type == 8):
             logger("DEBUG", self.name, "recv icmp-request, send reply")
-            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src)/ICMP(type="echo-reply")
+            packet = Ether(src=reply[Ether].dst, dst=reply[Ether].src)/IP(src=reply[IP].dst, dst=reply[IP].src, len=reply[IP].len)/ICMP(type="echo-reply", id=reply[ICMP].id, seq=reply[ICMP].seq)/Padding(load=reply[Raw].load)
             self.nic.sendp(packet)
 
         # TCP negotiation
